@@ -1,0 +1,104 @@
+{
+  "info": {
+    "_postman_id": "b4819f5e-aecf-4f3a-b0a7-2455ac58f8a8",
+    "name": "Backend Ledger API",
+    "description": "Run requests in order. System initial funding requires a pre-seeded system user; see POSTMAN_TESTING.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "password", "value": "pass1234" },
+    { "key": "fundingAmount", "value": "500" },
+    { "key": "transferAmount", "value": "100" },
+    { "key": "systemToken", "value": "SET_A_PRESEEDED_SYSTEM_USER_JWT" }
+  ],
+  "item": [
+    {
+      "name": "Health check",
+      "request": { "method": "GET", "url": "{{baseUrl}}/" },
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('service message', () => pm.expect(pm.response.text()).to.eql('Ledger Service is up and running'));"] } }]
+    },
+    {
+      "name": "Register Alice",
+      "event": [
+        { "listen": "prerequest", "script": { "exec": ["pm.collectionVariables.set('aliceEmail', 'alice.' + Date.now() + '@example.com');"] } },
+        { "listen": "test", "script": { "exec": ["pm.test('status is 201', () => pm.response.to.have.status(201));", "const body = pm.response.json();", "pm.collectionVariables.set('aliceToken', body.token);", "pm.collectionVariables.set('aliceUserId', body.user._id);"] } }
+      ],
+      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Alice Postman\",\n  \"email\": \"{{aliceEmail}}\",\n  \"password\": \"{{password}}\"\n}" }, "url": "{{baseUrl}}/api/auth/register" }
+    },
+    {
+      "name": "Register Bob",
+      "event": [
+        { "listen": "prerequest", "script": { "exec": ["pm.collectionVariables.set('bobEmail', 'bob.' + Date.now() + '@example.com');"] } },
+        { "listen": "test", "script": { "exec": ["pm.test('status is 201', () => pm.response.to.have.status(201));", "pm.collectionVariables.set('bobToken', pm.response.json().token);"] } }
+      ],
+      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Bob Postman\",\n  \"email\": \"{{bobEmail}}\",\n  \"password\": \"{{password}}\"\n}" }, "url": "{{baseUrl}}/api/auth/register" }
+    },
+    {
+      "name": "Login Alice",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.collectionVariables.set('aliceToken', pm.response.json().token);"] } }],
+      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{aliceEmail}}\",\n  \"password\": \"{{password}}\"\n}" }, "url": "{{baseUrl}}/api/auth/login" }
+    },
+    {
+      "name": "Create Alice account",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 201', () => pm.response.to.have.status(201));", "pm.collectionVariables.set('aliceAccountId', pm.response.json().account._id);"] } }],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }], "url": "{{baseUrl}}/api/accounts/" }
+    },
+    {
+      "name": "Create Bob account",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 201', () => pm.response.to.have.status(201));", "pm.collectionVariables.set('bobAccountId', pm.response.json().account._id);"] } }],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{bobToken}}" }], "url": "{{baseUrl}}/api/accounts/" }
+    },
+    {
+      "name": "List Alice accounts",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('contains accounts array', () => pm.expect(pm.response.json().accounts).to.be.an('array'));"] } }],
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }], "url": "{{baseUrl}}/api/accounts/" }
+    },
+    {
+      "name": "Alice starting balance",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('new account balance is 0', () => pm.expect(pm.response.json().balance).to.eql(0));"] } }],
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }], "url": "{{baseUrl}}/api/accounts/balance/{{aliceAccountId}}" }
+    },
+    {
+      "name": "System: add initial funds (requires systemToken)",
+      "event": [
+        { "listen": "prerequest", "script": { "exec": ["pm.collectionVariables.set('initialFundingKey', 'initial-' + Date.now());"] } },
+        { "listen": "test", "script": { "exec": ["pm.test('status is 201', () => pm.response.to.have.status(201));", "pm.test('transaction completed', () => pm.expect(pm.response.json().transaction.status).to.eql('COMPLETED'));"] } }
+      ],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{systemToken}}" }, { "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"toAccount\": \"{{aliceAccountId}}\",\n  \"amount\": {{fundingAmount}},\n  \"idempotencyKey\": \"{{initialFundingKey}}\"\n}" }, "url": "{{baseUrl}}/api/transactions/system/initial-funds" }
+    },
+    {
+      "name": "Transfer Alice to Bob",
+      "event": [
+        { "listen": "prerequest", "script": { "exec": ["pm.collectionVariables.set('transferKey', 'transfer-' + Date.now());"] } },
+        { "listen": "test", "script": { "exec": ["pm.test('status is 201', () => pm.response.to.have.status(201));", "pm.test('success message', () => pm.expect(pm.response.json().message).to.eql('Transaction completed successfully'));"] } }
+      ],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }, { "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fromAccount\": \"{{aliceAccountId}}\",\n  \"toAccount\": \"{{bobAccountId}}\",\n  \"amount\": {{transferAmount}},\n  \"idempotencyKey\": \"{{transferKey}}\"\n}" }, "url": "{{baseUrl}}/api/transactions/" }
+    },
+    {
+      "name": "Repeat transfer (idempotency)",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('already processed', () => pm.expect(pm.response.json().message).to.eql('Transaction already processed'));"] } }],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }, { "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fromAccount\": \"{{aliceAccountId}}\",\n  \"toAccount\": \"{{bobAccountId}}\",\n  \"amount\": {{transferAmount}},\n  \"idempotencyKey\": \"{{transferKey}}\"\n}" }, "url": "{{baseUrl}}/api/transactions/" }
+    },
+    {
+      "name": "Bob balance after transfer",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('received transfer amount', () => pm.expect(pm.response.json().balance).to.eql(Number(pm.collectionVariables.get('transferAmount'))));"] } }],
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{bobToken}}" }], "url": "{{baseUrl}}/api/accounts/balance/{{bobAccountId}}" }
+    },
+    {
+      "name": "Invalid transaction request",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 400', () => pm.response.to.have.status(400));", "pm.test('required-fields message', () => pm.expect(pm.response.json().message).to.include('required'));"] } }],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }, { "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amount\": 100\n}" }, "url": "{{baseUrl}}/api/transactions/" }
+    },
+    {
+      "name": "Logout Alice",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));"] } }],
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }], "url": "{{baseUrl}}/api/auth/logout" }
+    },
+    {
+      "name": "Protected request after logout",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.test('status is 401', () => pm.response.to.have.status(401));", "pm.test('blacklisted token is invalid', () => pm.expect(pm.response.json().message).to.include('invalid'));"] } }],
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{aliceToken}}" }], "url": "{{baseUrl}}/api/accounts/" }
+    }
+  ]
+}
